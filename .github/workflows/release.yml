@@ -1,0 +1,88 @@
+name: Build & Automated Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Nama Tag Rilis (contoh: v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build, Package & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ⚙️ Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 🔍 Verifikasi Sintaksis Kode
+        run: |
+          echo "Memeriksa sintaksis berkas JavaScript..."
+          node --check src/index.js
+          node --check src/handlers.js
+          node --check src/downloader.js
+          node --check src/admin.js
+          node --check src/db.js
+          node --check src/m3u8.js
+          node --check src/utils.js
+          echo "Semua berkas JavaScript valid!"
+
+      - name: 🏷️ Tentukan Versi Tag
+        id: vars
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          elif [[ -n "${{ github.event.inputs.tag_name }}" ]]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          else
+            PKG_VER=$(node -p "require('./package.json').version || '1.0.0'")
+            TAG="v${PKG_VER}-${GITHUB_RUN_NUMBER}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Target Release Tag: ${TAG}"
+
+      - name: 📦 Buat Paket Arsip Rilis (Bundle Archive)
+        run: |
+          mkdir -p dist
+          ZIP_NAME="athena-proxy-${{ steps.vars.outputs.tag }}.zip"
+          TAR_NAME="athena-proxy-${{ steps.vars.outputs.tag }}.tar.gz"
+
+          # Mengemas berkas inti ke dalam ZIP dan TAR.GZ
+          zip -r "dist/${ZIP_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md LICENSE 2>/dev/null || \
+          zip -r "dist/${ZIP_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md
+
+          tar -czvf "dist/${TAR_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md
+
+          echo "Arsip rilis berhasil dibuat di direktori dist/"
+          ls -lh dist/
+
+      - name: 🚀 Buat GitHub Release Otomatis
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Athena Proxy ${{ steps.vars.outputs.tag }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

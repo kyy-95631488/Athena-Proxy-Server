@@ -1,0 +1,26 @@
+{
+  "name": "athena-proxy",
+  "version": "1.0.0",
+  "description": "High-Performance Serverless Edge Proxy for TeraBox File Sharing, HLS Video Streaming, and Cloudflare D1 Metadata Caching.",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:cookie": "node scripts/wrangler-dev-local-cookie.cjs",
+    "deploy": "wrangler deploy",
+    "validate": "node --check src/index.js && node --check src/handlers.js && node --check src/downloader.js && node --check src/admin.js && node --check src/db.js && node --check src/m3u8.js && node --check src/utils.js"
+  },
+  "keywords": [
+    "cloudflare-workers",
+    "terabox",
+    "hls-streaming",
+    "d1-database",
+    "proxy",
+    "serverless"
+  ],
+  "author": "kyy-95631488",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.114.0"
+  }
+}
