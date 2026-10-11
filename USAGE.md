@@ -6,9 +6,10 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Project-Athena_Proxy-6366f1?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Athena Proxy" />
-  <img src="https://img.shields.io/badge/Base_URL-https%3A%2F%2Fdl.athenax.workers.dev%2F-blueviolet?style=for-the-badge&logo=cloudflare" alt="Base URL" />
-  <img src="https://img.shields.io/badge/Mudah_Digunakan-Orang_Awam_%26_Dev-success?style=for-the-badge" alt="User Friendly" />
-  <img src="https://img.shields.io/badge/CORS-Enabled-brightgreen?style=for-the-badge" alt="CORS" />
+  <img src="https://img.shields.io/badge/Base_URL-dl.athenax.workers.dev-8b5cf6?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Base URL" />
+  <img src="https://img.shields.io/badge/Akses-Semua_Pengguna-10b981?style=for-the-badge" alt="User Friendly" />
+  <img src="https://img.shields.io/badge/Streaming-HLS_%2F_M3U8-0ea5e9?style=for-the-badge&logo=playstation&logoColor=white" alt="HLS Streaming" />
+  <img src="https://img.shields.io/badge/CORS-Aktif-059669?style=for-the-badge" alt="CORS" />
 </p>
 
 ---
