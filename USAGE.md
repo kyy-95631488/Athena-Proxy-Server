@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Project-Athena_Proxy-6366f1?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Athena Proxy" />
-  <img src="https://img.shields.io/badge/Base_URL-dl.athenax.workers.dev-8b5cf6?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Base URL" />
+  <img src="https://img.shields.io/badge/Base_URL-webdl.athenax.workers.dev-8b5cf6?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Base URL" />
   <img src="https://img.shields.io/badge/Akses-Semua_Pengguna-10b981?style=for-the-badge" alt="User Friendly" />
   <img src="https://img.shields.io/badge/Streaming-HLS_%2F_M3U8-0ea5e9?style=for-the-badge&logo=playstation&logoColor=white" alt="HLS Streaming" />
   <img src="https://img.shields.io/badge/CORS-Aktif-059669?style=for-the-badge" alt="CORS" />
@@ -19,7 +19,7 @@
 Gunakan tautan resmi berikut untuk mengakses semua fitur layanan:
 
 ```text
-https://dl.athenax.workers.dev/
+https://webdl.athenax.workers.dev/
 ```
 
 ---
@@ -85,15 +85,16 @@ Ikuti 3 langkah mudah berikut:
 
 1. **Buka Web Downloader:**  
    Buka browser (Chrome, Edge, Safari, Firefox di HP/PC), lalu kunjungi:  
-   👉 **[https://dl.athenax.workers.dev/](https://dl.athenax.workers.dev/)**
+   👉 **[https://webdl.athenax.workers.dev/](https://webdl.athenax.workers.dev/)**
 2. **Tempel Tautan:**  
    Salin link TeraBox yang Anda punya, lalu klik tombol **Paste** atau tempelkan di kotak input URL.
 3. **Tekan Tombol Periksa (Resolve):**  
-   Klik tombol hitam bertanda panah `->`. Layanan akan memeriksa file selama 1-2 detik.
+   Klik tombol hitam bertanda panah `->` atau tekan **Ambil File**. Layanan akan memeriksa file selama 1-2 detik.
 4. **Nikmati Konten:**
    - **Jika berupa Video**: Pemutar video bawaan akan langsung muncul. Anda bisa langsung memutar video, mengatur kualitas, atau fullscreen.
-   - **Jika berupa Folder**: Anda akan melihat daftar file di dalamnya. Klik nama sub-folder untuk membukanya.
+   - **Jika berupa Folder**: Anda akan melihat daftar file di dalamnya. Klik nama sub-folder untuk membukanya secara interaktif.
    - **Download Berkas**: Klik tombol **Download** di samping nama file untuk langsung mengunduh ke memori perangkat Anda.
+   - **Tombol Sync DB**: Klik tombol **Sync DB** jika ingin melakukan sinkronisasi paksa dari TeraBox ke Database D1.
 
 ---
 
@@ -104,7 +105,7 @@ Jika Anda ingin memutar video dengan subtitle atau di Smart TV menggunakan **VLC
 1. Dapatkan kode link TeraBox Anda (misal `1AbCdEfGhIjKlMn`).
 2. Buat URL streaming seperti ini:
    ```text
-   https://dl.athenax.workers.dev/?mode=stream&surl=1AbCdEfGhIjKlMn
+   https://webdl.athenax.workers.dev/?mode=stream&surl=1AbCdEfGhIjKlMn
    ```
 3. Buka aplikasi **VLC Media Player**:
    - Di PC/Laptop: Pilih menu **Media** ➔ **Open Network Stream** (atau tekan `Ctrl + N`).
@@ -148,15 +149,14 @@ Semua request menggunakan metode **`HTTP GET`**:
 
 | Mode / Rute | Deskripsi Singkat | Parameter Wajib | Parameter Opsional |
 |---|---|---|---|
-| `resolve` ⭐ | Ekstrak metadata, daftar file, & auto-cache ke D1 | `surl` | `refresh`, `raw`, `dir`, `fid` |
+| `resolve` ⭐ | Ekstrak metadata, daftar file, & auto-cache ke D1 & KV | `surl` | `refresh`, `raw`, `dir`, `fid` |
 | `stream` 🎬 | Menghasilkan playlist streaming HLS (`.m3u8`) | `surl` | `type`, `fid`, `dir` |
 | `download` ⚡ | Unduh file binary atau dapatkan link redirect | `surl`, `fid` | `redirect`, `json` |
 | `lookup` 🚀 | Query kilat langsung ke database D1 (tanpa hit TeraBox) | `surl` atau `fid` | - |
 | `segment` 🛡️ | Proxy fragmen file video `.ts` (SSRF Protected) | `url` | - |
 | `thumbnail` 🖼️ | Proxy dan fallback gambar thumbnail | `url` | `fid`, `surl` |
-| `page` 📄 | Ambil HTML mentah dari halaman share TeraBox | `surl` | - |
-| `api` ⚙️ | Panggilan manual ke API internal TeraBox | `shorturl`, `jsToken` | `dir` |
 | `health` 💓 | Status kesehatan dan timestamp server | - | - |
+| `/admin/*` 🔐 | Kumpulan REST API operasi & KV cache | Header `x-admin-key` | `page`, `pageSize`, `q`, `sort`, dll. |
 
 ---
 
@@ -166,7 +166,7 @@ Semua request menggunakan metode **`HTTP GET`**:
 Digunakan untuk mengekstrak informasi detail berkas seperti ukuran, nama file, ID sistem file (`fid`), dan URL download. Hasilnya otomatis disimpan ke database D1.
 
 ```bash
-curl -X GET "https://dl.athenax.workers.dev/?mode=resolve&surl=1AbCdEfGhIjKlMn"
+curl -X GET "https://webdl.athenax.workers.dev/?mode=resolve&surl=1AbCdEfGhIjKlMn"
 ```
 
 **Contoh Output Respons JSON:**
@@ -199,7 +199,7 @@ curl -X GET "https://dl.athenax.workers.dev/?mode=resolve&surl=1AbCdEfGhIjKlMn"
 Mengembalikan playlist standar `.m3u8`. URL setiap segmen video di dalamnya telah ditransformasikan secara otomatis agar diarahkan melalui proxy aman Worker.
 
 ```bash
-curl -X GET "https://dl.athenax.workers.dev/?mode=stream&surl=1AbCdEfGhIjKlMn"
+curl -X GET "https://webdl.athenax.workers.dev/?mode=stream&surl=1AbCdEfGhIjKlMn"
 ```
 
 **Parameter Tambahan:**
@@ -212,7 +212,7 @@ curl -X GET "https://dl.athenax.workers.dev/?mode=stream&surl=1AbCdEfGhIjKlMn"
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:6
 #EXTINF:6.000,
-https://dl.athenax.workers.dev/?mode=segment&url=https%3A%2F%2Fdm.terabox.app%2F...
+https://webdl.athenax.workers.dev/?mode=segment&url=https%3A%2F%2Fdm.terabox.app%2F...
 #EXT-X-ENDLIST
 ```
 
@@ -225,17 +225,17 @@ Tersedia dalam 3 variasi:
 
 ##### A. Download Stream Langsung (Rekomendasi untuk cURL/IDM):
 ```bash
-curl -L -O "https://dl.athenax.workers.dev/download?surl=1AbCdEfGhIjKlMn&fid=511133506523791"
+curl -L -O "https://webdl.athenax.workers.dev/download?surl=1AbCdEfGhIjKlMn&fid=511133506523791"
 ```
 
 ##### B. Dapatkan 302 Redirect ke Link CDN Asli:
 ```bash
-curl -i "https://dl.athenax.workers.dev/download?surl=1AbCdEfGhIjKlMn&fid=511133506523791&redirect=1"
+curl -i "https://webdl.athenax.workers.dev/download?surl=1AbCdEfGhIjKlMn&fid=511133506523791&redirect=1"
 ```
 
 ##### C. Dapatkan Link JSON untuk Aplikasi Anda:
 ```bash
-curl -X GET "https://dl.athenax.workers.dev/download?surl=1AbCdEfGhIjKlMn&fid=511133506523791&json=1"
+curl -X GET "https://webdl.athenax.workers.dev/download?surl=1AbCdEfGhIjKlMn&fid=511133506523791&json=1"
 ```
 *Respons:*
 ```json
@@ -254,17 +254,17 @@ Mode tercepat (kurang dari 25ms). Mengambil data yang sebelumnya sudah pernah di
 
 ```bash
 # Lookup berdasarkan surl (share ID):
-curl -X GET "https://dl.athenax.workers.dev/?mode=lookup&surl=1AbCdEfGhIjKlMn"
+curl -X GET "https://webdl.athenax.workers.dev/?mode=lookup&surl=1AbCdEfGhIjKlMn"
 
 # Atau lookup berdasarkan fid (File ID):
-curl -X GET "https://dl.athenax.workers.dev/?mode=lookup&fid=511133506523791"
+curl -X GET "https://webdl.athenax.workers.dev/?mode=lookup&fid=511133506523791"
 ```
 
 ---
 
 #### 5. Mode `health` (Pengecekan Status Layanan)
 ```bash
-curl -X GET "https://dl.athenax.workers.dev/?mode=health"
+curl -X GET "https://webdl.athenax.workers.dev/?mode=health"
 ```
 *Respons:*
 ```json
@@ -292,7 +292,7 @@ Memasang pemutar video HLS streaming di website Anda menggunakan [HLS.js](https:
 
   <script>
     const surl = '1AbCdEfGhIjKlMn';
-    const streamUrl = `https://dl.athenax.workers.dev/?mode=stream&surl=${surl}`;
+    const streamUrl = `https://webdl.athenax.workers.dev/?mode=stream&surl=${surl}`;
     const video = document.getElementById('my-video');
 
     if (Hls.isSupported()) {
@@ -314,7 +314,7 @@ Memasang pemutar video HLS streaming di website Anda menggunakan [HLS.js](https:
 ```python
 import requests
 
-BASE_URL = "https://dl.athenax.workers.dev"
+BASE_URL = "https://webdl.athenax.workers.dev"
 SURL = "1AbCdEfGhIjKlMn"
 
 # 1. Resolve metadata
@@ -339,26 +339,39 @@ else:
 
 ## 🟣 BAGIAN 3: Panel Admin & Monitoring Database
 
-Athena Proxy dilengkapi antarmuka admin terpadu untuk mengecek log share dan metrik operasional:
+Athena Proxy dilengkapi antarmuka admin terpadu untuk mengecek log share, status Workers KV Cache, dan metrik operasional:
 
-- **Halaman Admin**: Buka `https://dl.athenax.workers.dev/admin` di browser Anda.
-- **Autentikasi**: Masukkan password kunci admin (`ADMIN_KEY`) yang telah Anda set di `wrangler.toml`. Kunci disimpan secara aman di browser session Anda.
+- **Halaman Admin**: Buka `https://webdl.athenax.workers.dev/admin` di browser Anda.
+- **Mekanisme Akses Diskrit (*Zero Admin Leaks*)**:
+  - Secara default konsol tersembunyi dari publik.
+  - Untuk membuka, tekan logo ⚡ Athena Proxy sebanyak 5 kali beruntun, atau tekan shortcut keyboard `Ctrl + Shift + A` (atau `Alt + A`).
+  - Masukkan Security Key (`ADMIN_KEY`) Anda.
+  - Untuk keluar dan menyembunyikan konsol kembali, klik tombol **Kunci** (gembok merah).
 
 ### Endpoint REST API Admin
 Jika ingin membaca data admin secara programatik, kirimkan header `x-admin-key: KUNCI_ANDA` atau parameter `?key=KUNCI_ANDA`:
 
 ```bash
 # 1. Ringkasan jumlah share & file
-curl -H "x-admin-key: KUNCI_ANDA" "https://dl.athenax.workers.dev/admin/overview"
+curl -H "x-admin-key: KUNCI_ANDA" "https://webdl.athenax.workers.dev/admin/overview"
 
 # 2. Daftar share tersimpan (dengan pencarian & pagination)
-curl -H "x-admin-key: KUNCI_ANDA" "https://dl.athenax.workers.dev/admin/shares?page=1&pageSize=20&q=video"
+curl -H "x-admin-key: KUNCI_ANDA" "https://webdl.athenax.workers.dev/admin/shares?page=1&pageSize=20&q=video"
 
 # 3. Daftar seluruh file media
-curl -H "x-admin-key: KUNCI_ANDA" "https://dl.athenax.workers.dev/admin/files?size_min=1048576"
+curl -H "x-admin-key: KUNCI_ANDA" "https://webdl.athenax.workers.dev/admin/files?size_min=1048576"
 
-# 4. Grafik riwayat jumlah share per hari
-curl -H "x-admin-key: KUNCI_ANDA" "https://dl.athenax.workers.dev/admin/analytics/processed?limit=30"
+# 4. Statistik Workers KV Cache
+curl -H "x-admin-key: KUNCI_ANDA" "https://webdl.athenax.workers.dev/admin/kv/stats"
+
+# 5. Inspeksi isi cache KV untuk SURL tertentu
+curl -H "x-admin-key: KUNCI_ANDA" "https://webdl.athenax.workers.dev/admin/kv/lookup?surl=1AbCdEfGhIjKlMn"
+
+# 6. Bersihkan cache KV untuk SURL tertentu
+curl -X POST -H "x-admin-key: KUNCI_ANDA" "https://webdl.athenax.workers.dev/admin/kv/purge?surl=1AbCdEfGhIjKlMn"
+
+# 7. Hapus share dan berkas terkait di D1
+curl -X DELETE -H "x-admin-key: KUNCI_ANDA" "https://webdl.athenax.workers.dev/admin/shares/1AbCdEfGhIjKlMn"
 ```
 
 ---

@@ -22,7 +22,7 @@
 - [🏗️ Arsitektur Sistem Terperinci](#️-arsitektur-sistem-terperinci)
   - [1. Arsitektur Berlapis (Multi-Tier Edge Architecture)](#1-arsitektur-berlapis-multi-tier-edge-architecture)
   - [2. Topologi & Diagram Komponen Global](#2-topologi--diagram-komponen-global)
-  - [3. Arsitektur Caching Bertingkat (L1 Memory ➔ L2 Cloudflare D1)](#3-arsitektur-caching-bertingkat-l1-memory--l2-cloudflare-d1)
+  - [3. Arsitektur Caching Bertingkat (L1 Memory ➔ L2 Workers KV ➔ L3 Cloudflare D1)](#3-arsitektur-caching-bertingkat-l1-memory--l2-workers-kv--l3-cloudflare-d1)
   - [4. Pipeline Resolusi & Metadata (`mode=resolve`)](#4-pipeline-resolusi--metadata-moderesolve)
   - [5. Pipeline Video Streaming HLS (`mode=stream` & `mode=segment`)](#5-pipeline-video-streaming-hls-modestream--modesegment)
   - [6. Pipeline Unduhan Resumable (`mode=download`)](#6-pipeline-unduhan-resumable-modedownload)
@@ -63,12 +63,13 @@ Layanan ini siap digunakan baik secara visual melalui **Web Downloader UI** teri
 - 🚀 **Serverless Edge Performance**: Berjalan di 300+ lokasi pusat data Cloudflare di seluruh dunia dengan latensi mendekati nol.
 - 🎬 **HLS Video Streaming (`M3U8`)**: Mengubah link video TeraBox menjadi playlist HLS adaptif yang kompatibel dengan browser, iOS/Android, VLC, dan Smart TV.
 - 🛡️ **SSRF-Protected Video Segment Proxy**: Mem-proxy fragmen video (`.ts`) dengan sanitasi ketat menggunakan whitelist domain resmi TeraBox untuk menangkal serangan *Server-Side Request Forgery* (SSRF).
-- 💾 **Dual-Tier Intelligent Caching**:
+- 💾 **Triple-Tier Intelligent Caching**:
   - **L1 In-Memory Cache (Isolate)**: Menyimpan respons berhasil selama 15 detik per isolate Worker dengan mekanisme *Request Coalescing* (mencegah request ganda serentak).
-  - **L2 Cloudflare D1 SQL**: Penyimpanan persisten untuk semua metadata share, berkas media, dan thumbnail.
+  - **L2 Cloudflare Workers KV Cache**: Cache berlatensi sub-milidetik (`env.SHARE_KV`) dengan TTL 7 hari untuk pembacaan instan key-value tanpa beban D1/TeraBox.
+  - **L3 Cloudflare D1 SQL**: Penyimpanan persisten untuk semua metadata share, berkas media, dan thumbnail.
 - ⚡ **Direct & Resumable Download Stream**: Endpoint download dengan dukungan header `Range` (HTTP 206 Partial Content) dan mode redirect CDN `302`.
-- 🖥️ **Web Downloader UI Responsif**: Antarmuka bersih, ramah pengguna awam, dilengkapi video player bawaan dan penjelajah hierarki folder.
-- 📊 **Admin Operations Dashboard**: Panel monitoring terproteksi key untuk mengeksplorasi database D1, pencarian file, dan analisis grafik tautan harian.
+- 🖥️ **Web Downloader UI Auto-Responsive**: Antarmuka bersih, ramah pengguna awam, dilengkapi video player bawaan, penjelajah hierarki folder, dan sinkronisasi instan (*Sync DB*).
+- 📊 **Admin Operations Dashboard Terproteksi & Diskrit**: Panel 6-tab monitoring terproteksi key (Overview, Kelola Share, Arsip Berkas, Galeri Thumbnail, Cache KV, Diagnostik Edge) dengan shortcut rahasia (5-tap logo atau `Ctrl+Shift+A`), auto-clearing URL key, dan tombol gembok pengunci instan.
 - 🌐 **Full CORS & Standard JSON**: Siap dihubungkan ke bot Telegram/Discord, aplikasi mobile, maupun web frontend apa pun.
 
 ---
@@ -128,21 +129,20 @@ flowchart TB
     end
 
     subgraph EdgeWorker["2. Athena Proxy (Cloudflare Edge Worker)"]
-        Router["⚡ Request Router & CORS Handler (src/index.js)"]
-        DownloaderUI["📄 Downloader UI Engine (src/downloader.js)"]
-        AdminUI["📊 Admin UI Engine (src/admin.js)"]
+        Router["⚡ Request Router & CORS Handler (src/core/Router.js)"]
+        ReactUI["⚛️ Modern React + Vite SPA (web/ & Cloudflare Assets)"]
         
-        subgraph LogicHandlers["Modul Bisnis (src/handlers.js)"]
-            H_Resolve["Resolve Handler<br/>(Metadata Parser)"]
-            H_Stream["Stream Handler<br/>(HLS Builder)"]
-            H_Segment["Segment Proxy<br/>(SSRF Safe)"]
-            H_Download["Direct Download<br/>(Range Proxy)"]
-            H_Lookup["Lookup Handler<br/>(Fast D1 Query)"]
-            H_Admin["Admin REST API<br/>(Protected)"]
+        subgraph LogicHandlers["OOP Controllers (src/controllers/)"]
+            H_Resolve["ResolveController<br/>(Metadata Parser)"]
+            H_Stream["StreamController<br/>(HLS & Segment Proxy)"]
+            H_Download["DownloadController<br/>(Range Proxy)"]
+            H_Lookup["LookupController<br/>(Fast D1 Query)"]
+            H_Thumbnail["ThumbnailController<br/>(Image Proxy)"]
+            H_Admin["AdminController<br/>(Protected Management API)"]
         end
 
-        M3U8Rewriter["🔄 M3U8 Rewriter (src/m3u8.js)"]
-        SecurityFilter["🛡️ SSRF & Rate-Limit Filter (src/utils.js)"]
+        M3U8Rewriter["🔄 PlaylistService (src/services/PlaylistService.js)"]
+        SecurityFilter["🛡️ Helpers & Security (src/utils/helpers.js)"]
     end
 
     subgraph StorageTier["3. Lapisan Caching & Penyimpanan"]
@@ -179,7 +179,7 @@ flowchart TB
 
 ---
 
-### 3. Arsitektur Caching Bertingkat (L1 Memory ➔ L2 Cloudflare D1)
+### 3. Arsitektur Caching Bertingkat (L1 Memory ➔ L2 Workers KV ➔ L3 Cloudflare D1)
 
 Untuk menjamin kecepatan tinggi dan meminimalisir kemungkinan pemblokiran dari server TeraBox, Athena Proxy menerapkan strategi caching bertingkat:
 
@@ -190,15 +190,19 @@ flowchart TD
     CheckCooldown -- Tidak --> CheckL1{"Cek L1 In-Memory Cache<br/>(Isolate Cache 15s)"}
 
     CheckL1 -- Cache Hit --> ReturnL1["200 OK: Ambil dari Memori Isolate<br/>(X-Resolve-Cache: HIT)"]
-    CheckL1 -- Cache Miss --> InFlight{"Cek In-Flight Request<br/>(Request Coalescing)"}
+    CheckL1 -- Cache Miss --> CheckL2{"Cek L2 Workers KV Cache<br/>(TTL 7 Hari)"}
+
+    CheckL2 -- Cache Hit --> ReturnL2["200 OK: Ambil dari Workers KV<br/>(X-Resolve-Cache: KV-HIT)"]
+    CheckL2 -- Cache Miss --> InFlight{"Cek In-Flight Request<br/>(Request Coalescing)"}
 
     InFlight -- Sedang Berjalan --> WaitInFlight["Tunggu Request Serupa Selesai<br/>(Gunakan Respons yang Sama)"]
     InFlight -- Belum Berjalan --> FetchUpstream["Eksekusi Fetch ke TeraBox Upstream"]
 
     FetchUpstream --> UpstreamResult{"Status Respons TeraBox"}
     UpstreamResult -- Captcha / Rate Limit --> SetCooldown["Pasang Cooldown 30s di Isolate"] --> ErrUpstream["403 / 429: Verifikasi Diperlukan"]
-    UpstreamResult -- Berhasil --> SaveD1["Simpan ke L2: Cloudflare D1 Database<br/>(Batch Insert shares + files + thumbs)"]
-    SaveD1 --> SaveL1["Simpan ke L1: In-Memory Cache (15s)"]
+    UpstreamResult -- Berhasil --> SaveD1["Simpan ke L3: Cloudflare D1 SQL<br/>(Batch Insert shares + files + thumbs)"]
+    SaveD1 --> SaveKV["Simpan ke L2: Workers KV Cache<br/>(TTL 7 Hari)"]
+    SaveKV --> SaveL1["Simpan ke L1: In-Memory Cache (15s)"]
     SaveL1 --> ReturnSuccess["200 OK: Kirimkan Data ke Pengguna"]
 ```
 
@@ -325,32 +329,64 @@ Berikut struktur modul kode sumber Athena Proxy:
 ```
 athena-proxy/
 ├── src/
-│   ├── index.js            # Entry point Worker & Router utama (CORS, route matching)
-│   ├── handlers.js         # Handler logika bisnis untuk setiap mode & admin API
-│   ├── downloader.js       # UI Web Downloader mandiri (HTML/CSS/JS reaktif + HLS)
-│   ├── admin.js            # UI Admin Operations Dashboard mandiri (Single-Page App)
-│   ├── db.js               # Abstraksi database Cloudflare D1 (Batch inserts & queries)
-│   ├── m3u8.js             # Parser dan URL rewriter playlist streaming HLS
-│   └── utils.js            # Fungsi pembantu (CORS, SSRF validation, HTTP headers, token)
+│   ├── core/                           # Inti arsitektur aplikasi & routing OOP
+│   │   ├── Application.js              # Kelas Application utama untuk Cloudflare Worker
+│   │   ├── Router.js                   # Kelas Router untuk route & query dispatcher
+│   │   └── HttpResponse.js             # Kelas HttpResponse builder (CORS, error formatting)
+│   ├── controllers/                    # Controller penangan rute & request
+│   │   ├── BaseController.js           # Base controller dengan helper repositori & respon
+│   │   ├── ResolveController.js        # Controller mode=resolve & metadata extraction
+│   │   ├── StreamController.js         # Controller mode=stream & mode=segment HLS
+│   │   ├── DownloadController.js       # Controller mode=download & resumable stream
+│   │   ├── ThumbnailController.js      # Controller mode=thumbnail & dynamic refresh
+│   │   ├── LookupController.js         # Controller mode=lookup langsung dari D1
+│   │   ├── AdminController.js          # Controller REST API operations dashboard
+│   │   └── LegacyController.js         # Controller mode=page & mode=api
+│   ├── services/                       # Logika bisnis dan integrasi eksternal
+│   │   ├── TeraBoxService.js           # Client interaksi API & scraping TeraBox
+│   │   ├── HttpClient.js               # HTTP client dengan timeout & retry otomatis
+│   │   ├── CookieService.js            # Pengelola cookie sesi & domain matching
+│   │   ├── CacheService.js             # In-memory L1 cache & failure cooldown
+│   │   ├── PlaylistService.js          # Parser & rewriter playlist M3U8
+│   │   └── TransformerService.js       # Transformasi data berkas & proxy thumbnail
+│   ├── repositories/                   # Lapisan persistensi data (Data Access Layer)
+│   │   └── ShareRepository.js          # Abstraksi Cloudflare D1 SQL (batch & queries)
+│   ├── config/                         # Konfigurasi & konstanta sistem
+│   │   └── constants.js                # Allowlist domain, TTL cache, signing keys
+│   ├── utils/                          # Fungsi pembantu & sanitasi
+│   │   └── helpers.js                  # Validator SURL, token extraction, math helpers
+│   └── index.js                        # Worker entrypoint (mendelegasikan ke Application & Router)
+├── web/                                # Modern React + Vite + Tailwind frontend
+│   ├── src/
+│   │   ├── components/                 # Reusable UI components (Navbar, VideoPlayer, FileCard, FolderView)
+│   │   ├── pages/                      # DownloaderPage.jsx & AdminPage.jsx
+│   │   ├── services/api.js             # Client API terpusat
+│   │   ├── App.jsx                     # Route switcher SPA
+│   │   ├── main.jsx                    # React root entrypoint
+│   │   └── index.css                   # Tailwind CSS & theme tokens
+│   ├── dist/                           # Production build bundle untuk Cloudflare Workers Assets
+│   ├── index.html                      # HTML root template
+│   ├── vite.config.js                  # Vite configuration
+│   └── package.json                    # Dependencies React & Tailwind
 ├── scripts/
-│   └── wrangler-dev-local-cookie.cjs  # Runner dev lokal dengan injeksi cookie otomatis
-├── schema.sql              # Skema SQL D1 (shares, media_files, thumbnails)
-├── wrangler.toml           # Konfigurasi Cloudflare Workers & binding D1
-├── README.md               # Dokumentasi arsitektur dan teknis proyek
-└── USAGE.md                # Panduan praktis penggunaan API & Web (User-Friendly)
+│   ├── verify-baseline.js              # Unit & integration test kesesuaian sistem
+│   └── wrangler-dev-local-cookie.cjs   # Runner dev lokal dengan injeksi cookie otomatis
+├── schema.sql                          # Skema SQL D1 (shares, media_files, thumbnails)
+├── wrangler.toml                       # Konfigurasi Cloudflare Workers, Assets, & binding D1
+├── README.md                           # Dokumentasi arsitektur dan teknis proyek
+└── USAGE.md                            # Panduan praktis penggunaan API & Web
 ```
 
-### Penjelasan Modul Inti
+### Penjelasan Modul & Layer OOP
 
-| Berkas | Tanggung Jawab Utama |
-|---|---|
-| [`src/index.js`](file:///home/athenaserver/Project/Web/tbx-proxy/src/index.js) | Menerima request Cloudflare Worker, mengatur preflight CORS, merutekan request berdasarkan parameter `mode` atau path `/admin` dan `/download`. |
-| [`src/handlers.js`](file:///home/athenaserver/Project/Web/tbx-proxy/src/handlers.js) | Logika penanganan: `handleResolve`, `handleStream`, `handleSegment`, `handleDownload`, `handleLookup`, serta seluruh REST endpoint admin. |
-| [`src/downloader.js`](file:///home/athenaserver/Project/Web/tbx-proxy/src/downloader.js) | Menyajikan halaman web downloader lengkap dengan input link, penampil daftar folder, player HLS.js, dan tombol download langsung. |
-| [`src/admin.js`](file:///home/athenaserver/Project/Web/tbx-proxy/src/admin.js) | Menyajikan dashboard admin dengan tab Overview, Shares, Media Files, Thumbnails, Analytics, dan KV/D1 lookup. |
-| [`src/db.js`](file:///home/athenaserver/Project/Web/tbx-proxy/src/db.js) | Melakukan operasi D1 batch SQL berkinerja tinggi untuk menyimpan metadata share, media file, dan thumbnail dalam 1 transaksi. |
-| [`src/m3u8.js`](file:///home/athenaserver/Project/Web/tbx-proxy/src/m3u8.js) | Mengubah URI segmen dalam berkas `.m3u8` agar diarahkan ke endpoint proxy `/mode=segment` milik Worker. |
-| [`src/utils.js`](file:///home/athenaserver/Project/Web/tbx-proxy/src/utils.js) | Menghandle ekstraksi `jsToken`, validasi `surl`, sanitasi header, allowlist domain SSRF, dan standardisasi format error. |
+| Lapisan / Modul | Berkas Utama | Tanggung Jawab Utama |
+|---|---|---|
+| **Core Architecture** | [`src/core/`](file:///home/athenaserver/Project/Web/tbx-proxy/src/core/) | Mengelola daur hidup request Worker, pipeline middleware CORS, dan routing permintaan secara berorientasi objek. |
+| **Controllers** | [`src/controllers/`](file:///home/athenaserver/Project/Web/tbx-proxy/src/controllers/) | Memisahkan setiap mode endpoint ke dalam controller khusus (`Resolve`, `Stream`, `Download`, `Thumbnail`, `Lookup`, `Admin`, `Legacy`). |
+| **Domain Services** | [`src/services/`](file:///home/athenaserver/Project/Web/tbx-proxy/src/services/) | Enkapsulasi logika bisnis: klien upstream TeraBox, HTTP fetch dengan exponential backoff, manajemen sesi cookie, cache memori L1, dan manipulasi M3U8. |
+| **Data Repository** | [`src/repositories/`](file:///home/athenaserver/Project/Web/tbx-proxy/src/repositories/) | Abstraksi akses database D1 (SQLite terdistribusi) untuk menyimpan dan mengambil share, media files, dan thumbnails dalam batch. |
+| **Config & Helpers** | [`src/config/`](file:///home/athenaserver/Project/Web/tbx-proxy/src/config/), [`src/utils/`](file:///home/athenaserver/Project/Web/tbx-proxy/src/utils/) | Konstanta allowlist, waktu TTL cache, dan fungsi sanitasi parameter URL/SURL. |
+| **Modern Frontend SPA** | [`web/`](file:///home/athenaserver/Project/Web/tbx-proxy/web/) | Antarmuka pengguna modern berbasis React 18, Vite, Tailwind CSS, Lucide icons, dan HLS.js, di-serve melalui Cloudflare Workers Static Assets. |
 
 ---
 
@@ -410,39 +446,54 @@ CREATE INDEX IF NOT EXISTS idx_thumbnails_fs_id ON thumbnails(fs_id);
 ## 🌐 Antarmuka Web Bawaan
 
 ### Web Downloader (`/` atau `/download`)
-- Akses langsung melalui browser: `https://dl.athenax.workers.dev/`
+- Akses langsung melalui browser: `https://webdl.athenax.workers.dev/`
 - **Fitur**:
   - Kolom input praktis untuk URL TeraBox maupun shortcode (`surl`).
   - Tombol **Paste** otomatis dari clipboard.
   - Video Player HLS bawaan: tonton video langsung di browser tanpa install aplikasi tambahan.
-  - Tampilan hierarki folder dan file interaktif.
+  - Tampilan hierarki folder dan penjelajah file interaktif.
+  - Tombol **Sync DB** untuk sinkronisasi ulang data langsung dari TeraBox ke Database D1.
   - Tombol download langsung ke perangkat.
+  - Desain 100% **Auto-Responsive** (nyaman di HP 320px–375px hingga monitor Desktop ultra-wide).
 
 ### Admin Operations Dashboard (`/admin`)
-- Akses melalui: `https://dl.athenax.workers.dev/admin`
-- **Fitur**:
-  - Autentikasi aman berbasis `ADMIN_KEY` via `sessionStorage` (tanpa membocorkan key di URL).
-  - Statistik total share, file media, dan thumbnail.
-  - Tabel penjelajah data dengan fitur pagination, pencarian nama file, dan sorting ukuran.
-  - Grafik tren tautan yang diproses per hari (*processed shares analytics*).
+- Akses melalui: `https://webdl.athenax.workers.dev/admin`
+- **Fitur Keamanan & Privasi (*Zero Admin Leaks*)**:
+  - Secara default konsol tersembunyi dari publik dan navbar publik hanya menampilkan status gateway.
+  - Akses rahasia: Tekan logo ⚡ Athena sebanyak 5 kali beruntun ATAU tekan shortcut `Ctrl + Shift + A` (`Alt + A`).
+  - Input Security Key (`ADMIN_KEY`) tersimpan aman di `localStorage` dan parameter `?key=` otomatis dihapus dari URL browser history.
+  - Tombol **Kunci Console** (gembok merah) untuk keluar dan menyembunyikan konsol seketika.
+- **6 Tab Operasional Terpadu**:
+  1. **Ringkasan (Overview)**: KPI total share, berkas media, thumbnail, kapasitas storage, breakdown kategori, dan aktivitas share terbaru dengan format tanggal lokal Indonesia yang akurat.
+  2. **Kelola Share**: Pencarian instan judul/SURL/UK, pagination dinamis, sorting, modal rincian berkas, dan hapus data.
+  3. **Arsip Berkas Media**: Filter kategori (Video, Gambar, Berkas, Folder), filter rentang ukuran, dan pemutar preview video/gambar langsung.
+  4. **Galeri Thumbnail**: Visual grid thumbnail media dengan filter fs_id.
+  5. **Cache & KV**: Monitor status Workers KV, inspeksi raw JSON cache, dan fitur **Purge KV** instan.
+  6. **Diagnostik & Edge**: Pengujian latency riil sub-25ms ke edge endpoint Cloudflare Workers dan pemeriksaan status probe D1.
 
 ---
 
 ## ⚡ Ringkasan Endpoint API
 
-Semua endpoint berbasis **HTTP GET** dengan dukungan penuh header CORS.
+Semua endpoint berbasis **HTTP GET** (dan **POST/DELETE** untuk manajemen admin) dengan dukungan penuh header CORS.
 
 | Mode / Path | Kegunaan | Parameter Utama | Output |
 |---|---|---|---|
 | `GET /` atau `/download` | Web Downloader UI | Tidak ada | HTML Page |
-| `GET /?mode=resolve` | Ekstrak metadata & simpan ke D1 | `surl` *(wajib)*, `refresh=1`, `raw=1` | JSON `{ source, data }` |
+| `GET /?mode=resolve` | Ekstrak metadata & simpan ke D1/KV | `surl` *(wajib)*, `refresh=1`, `raw=1` | JSON `{ source, data }` |
 | `GET /?mode=stream` | Dapatkan playlist streaming M3U8 | `surl` *(wajib)*, `type`, `fid` | M3U8 Playlist Stream |
 | `GET /download` atau `?mode=download` | Download stream berkas langsung | `surl`, `fid` *(wajib)*, `redirect=1`, `json=1` | Binary File / 302 Redirect / JSON |
 | `GET /?mode=lookup` | Query instan data D1 (tanpa upstream) | `surl` atau `fid` *(wajib)* | JSON `{ source: "d1", data }` |
 | `GET /?mode=segment` | Proxy fragmen TS video (SSRF safe) | `url` *(wajib, domain TeraBox)* | Binary `.ts` video stream |
 | `GET /?mode=thumbnail` | Proxy thumbnail ter-cache | `url` *(wajib)* | Binary Image Stream |
 | `GET /?mode=health` | Pemeriksaan kesehatan layanan | Tidak ada | JSON `{ status: "ok" }` |
-| `GET /admin/*` | Kumpulan REST API internal admin | Header `x-admin-key` atau `?key=` | JSON Admin Analytics & Explorer |
+| `GET /admin/overview` | Ringkasan statistik & KPI D1 | Header `x-admin-key` atau `?key=` | JSON `{ counts, latestShares, kv }` |
+| `GET /admin/shares` | Data tabel share (search, sort, page) | `page`, `pageSize`, `q`, `sort`, `order` | JSON `{ items, total, page }` |
+| `GET /admin/files` | Data arsip media files (kategori, ukuran) | `category`, `size_min`, `size_max`, `q` | JSON `{ items, total, page }` |
+| `GET /admin/kv/stats` | Statistik cache Workers KV & TTL policy | Header `x-admin-key` | JSON `{ enabled, ttl_seconds }` |
+| `GET /admin/kv/lookup` | Inspeksi raw cache KV berdasarkan SURL | `surl` *(wajib)* | JSON `{ surl, cached, data }` |
+| `POST /admin/kv/purge` | Bersihkan cache KV untuk SURL tertentu | `surl` *(opsional)* | JSON `{ ok, purged }` |
+| `DELETE /admin/shares/:id` | Hapus share dan berkas terkait di D1 | `:id` (share_id) | JSON `{ ok, deleted_files }` |
 
 > [!TIP]
 > Panduan lengkap penggunaan API, contoh kode cURL, Fetch JavaScript, Python, dan panduan untuk orang awam tersedia di [**USAGE.md**](file:///home/athenaserver/Project/Web/tbx-proxy/USAGE.md).
@@ -496,28 +547,37 @@ Semua endpoint berbasis **HTTP GET** dengan dukungan penuh header CORS.
    npx wrangler d1 execute sharedfile --local --file=./schema.sql
    ```
 
-### Testing Lokal
+### Testing Lokal & Pengembangan Frontend
 
-Jalankan dev server Worker secara lokal:
-```bash
-npx wrangler dev
-```
-Server lokal akan aktif di `http://localhost:8787`.
+1. **Jalankan Frontend React (Vite HMR):**
+   ```bash
+   npm run dev:web
+   ```
+   Aplikasi React + TailwindCSS akan berjalan di `http://localhost:5173` dengan Hot Module Replacement (HMR).
 
-Untuk menguji dengan akun/cookie TeraBox lokal secara aman:
-```bash
-node scripts/wrangler-dev-local-cookie.cjs
-```
-*Script ini akan menjalankan Wrangler di port `8788` dengan cookie yang di-inject khusus untuk request ke host TeraBox secara lokal.*
+2. **Jalankan Backend Worker Secara Lokal:**
+   ```bash
+   npm run dev
+   # Atau dengan cookie lokal:
+   npm run dev:cookie
+   ```
+   Server backend Worker akan aktif di `http://localhost:8787` (atau `8788`).
+
+3. **Build Frontend Production:**
+   ```bash
+   npm run build:web
+   ```
+   Aset statis dikompilasi ke direktori `./web/dist` dan siap di-serve oleh Cloudflare Workers Static Assets.
 
 ### Deploy ke Cloudflare
 
-Kompilasi dan deploy ke jaringan global Cloudflare Workers dengan satu perintah:
+Kompilasi frontend dan deploy ke jaringan global Cloudflare Workers dengan satu perintah:
 ```bash
-npx wrangler deploy
+npm run deploy
 ```
+*Perintah ini otomatis mengompilasi `./web/dist` dan mempublikasikannya bersama Worker ke Cloudflare CDN.*
 
-Worker Anda akan langsung aktif di domain Anda, misalnya: `https://dl.athenax.workers.dev/`.
+Worker Anda akan langsung aktif di domain Anda, misalnya: `https://webdl.athenax.workers.dev/`.
 
 ---
 

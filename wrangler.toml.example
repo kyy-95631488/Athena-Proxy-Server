@@ -3,9 +3,13 @@ main = "src/index.js"
 compatibility_date = "2024-09-23"
 
 [[d1_databases]]
-binding =
-database_name = 
-database_id = 
+binding = "sharedfile"
+database_name = "sharedfile"
+database_id = ""
+
+[[kv_namespaces]]
+binding = "SHARE_KV"
+id = "" 
 
 [observability]
 [observability.logs]
