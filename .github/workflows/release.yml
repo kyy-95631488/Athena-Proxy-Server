@@ -32,17 +32,13 @@ jobs:
         with:
           node-version: 20
 
-      - name: 🔍 Verifikasi Sintaksis Kode
+      - name: 🔍 Verifikasi Sintaksis Kode & Pengujian Baseline
         run: |
-          echo "Memeriksa sintaksis berkas JavaScript..."
-          node --check src/index.js
-          node --check src/handlers.js
-          node --check src/downloader.js
-          node --check src/admin.js
-          node --check src/db.js
-          node --check src/m3u8.js
-          node --check src/utils.js
-          echo "Semua berkas JavaScript valid!"
+          echo "Memeriksa sintaksis seluruh berkas JavaScript di src/..."
+          find src -name "*.js" -exec node --check {} +
+          echo "Menjalankan pengujian baseline arsitektur OOP..."
+          node scripts/verify-baseline.js
+          echo "Semua berkas JavaScript valid dan tes baseline berhasil!"
 
       - name: 🏷️ Tentukan Versi Tag
         id: vars
@@ -65,10 +61,10 @@ jobs:
           TAR_NAME="athena-proxy-${{ steps.vars.outputs.tag }}.tar.gz"
 
           # Mengemas berkas inti ke dalam ZIP dan TAR.GZ
-          zip -r "dist/${ZIP_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md LICENSE 2>/dev/null || \
-          zip -r "dist/${ZIP_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md
+          zip -r "dist/${ZIP_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md LICENSE web/ 2>/dev/null || \
+          zip -r "dist/${ZIP_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md web/
 
-          tar -czvf "dist/${TAR_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md
+          tar -czvf "dist/${TAR_NAME}" src/ scripts/ schema.sql wrangler.toml.example package.json README.md USAGE.md web/
 
           echo "Arsip rilis berhasil dibuat di direktori dist/"
           ls -lh dist/
